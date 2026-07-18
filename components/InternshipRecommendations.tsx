@@ -11,6 +11,8 @@ import { CheckCircleIcon } from './icons/CheckCircleIcon';
 import { MapIcon } from './icons/MapIcon';
 import { BanknotesIcon } from './icons/BanknotesIcon';
 import { ArrowUpTrayIcon } from './icons/ArrowUpTrayIcon';
+import { PlayCircleIcon } from './icons/PlayCircleIcon';
+import { InternshipSimulator } from './InternshipSimulator';
 
 const ScoreBar: React.FC<{ score: number; label: string; color: string }> = ({ score, label, color }) => (
     <div className="w-full">
@@ -33,6 +35,7 @@ const InternshipDetailModal: React.FC<{
     onApply: (internshipId: number) => void;
 }> = ({ internship, student, onClose, isApplied, onApply }) => {
     const [isCoachOpen, setIsCoachOpen] = useState(false);
+    const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
 
     const handleApplyClick = () => {
         if (internship.externalLink) {
@@ -93,7 +96,7 @@ const InternshipDetailModal: React.FC<{
                                 <p className="text-slate-600 leading-relaxed">{internship.description}</p>
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
                                  <button 
                                     onClick={handleApplyClick}
                                     disabled={isApplied}
@@ -121,6 +124,15 @@ const InternshipDetailModal: React.FC<{
                                     Ask AI Coach
                                 </button>
                             </div>
+                            <div className="mb-6">
+                                <button 
+                                    onClick={() => setIsSimulatorOpen(true)}
+                                    className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-800 transition"
+                                >
+                                    <PlayCircleIcon className="h-5 w-5" />
+                                    Try a "Day 1" Simulation
+                                </button>
+                            </div>
 
                             <div className="space-y-6">
                                 <div>
@@ -144,6 +156,12 @@ const InternshipDetailModal: React.FC<{
                     student={student}
                     internship={internship}
                     onClose={() => setIsCoachOpen(false)}
+                />
+            )}
+            {isSimulatorOpen && (
+                <InternshipSimulator
+                    internship={internship}
+                    onClose={() => setIsSimulatorOpen(false)}
                 />
             )}
         </>

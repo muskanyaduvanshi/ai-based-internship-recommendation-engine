@@ -1,130 +1,249 @@
 
 import type { Student, Internship, Interaction, Recruiter, Job, Application } from '../types';
-// In a real application, you would remove the mockData import.
-// We keep it here to simulate a network response.
-import { students, internships, interactions, recruiters, jobs, applications } from '../data/mockData';
+// mockData is only ever used as the ONE-TIME seed for a brand new browser.
+// Once localStorage has been initialized, it is the single source of truth.
+import {
+  students as seedStudents,
+  internships as seedInternships,
+  interactions as seedInteractions,
+  recruiters as seedRecruiters,
+  jobs as seedJobs,
+  applications as seedApplications,
+} from '../data/mockData';
 
-const API_BASE_URL = '/api'; // Placeholder for your backend URL
-
-// Simulates a network delay
+// Simulates a network delay so existing loading states keep working exactly as before.
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+const hasLocalStorage = typeof window !== 'undefined' && !!window.localStorage;
+
+const KEYS = {
+  students: 'pmis_students',
+  internships: 'pmis_internships',
+  interactions: 'pmis_interactions',
+  recruiters: 'pmis_recruiters',
+  jobs: 'pmis_jobs',
+  applications: 'pmis_applications',
+  initialized: 'pmis_initialized',
+  session: 'pmis_session',
+} as const;
+
+// --- Low-level, guarded localStorage helpers -------------------------------
+// Every read/write is wrapped in try/catch. If localStorage is unavailable
+// (private browsing, quota exceeded, disabled by the user, etc.) the app
+// falls back to the in-memory `fallback` value for that call instead of
+// crashing, and logs a warning so it's easy to diagnose.
+
+function readCollection<T>(key: string, fallback: T[]): T[] {
+  if (!hasLocalStorage) return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw === null) return fallback;
+    return JSON.parse(raw) as T[];
+  } catch (e) {
+    console.error(`[storage] Failed to read "${key}" from localStorage. Using fallback data.`, e);
+    return fallback;
+  }
+}
+
+function writeCollection<T>(key: string, data: T[]): void {
+  if (!hasLocalStorage) return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(data));
+  } catch (e) {
+    console.error(`[storage] Failed to write "${key}" to localStorage. This change will not persist across refreshes.`, e);
+  }
+}
+
 /**
- * In a real implementation, this function would use `fetch` to get data
- * from a real backend server.
+ * Seeds localStorage from data/mockData.ts the FIRST time the app ever runs
+ * in a given browser. On every later launch this is a no-op, so localStorage
+ * (not mockData.ts) is always the source of truth once it exists -- newly
+ * registered students/recruiters, new jobs, and new applications are never
+ * clobbered by this.
  */
+function ensureInitialized(): void {
+  if (!hasLocalStorage) return;
+  try {
+    if (window.localStorage.getItem(KEYS.initialized) === 'true') return;
+    writeCollection(KEYS.students, seedStudents);
+    writeCollection(KEYS.internships, seedInternships);
+    writeCollection(KEYS.interactions, seedInteractions);
+    writeCollection(KEYS.recruiters, seedRecruiters);
+    writeCollection(KEYS.jobs, seedJobs);
+    writeCollection(KEYS.applications, seedApplications);
+    window.localStorage.setItem(KEYS.initialized, 'true');
+  } catch (e) {
+    console.error('[storage] Failed to initialize localStorage seed data.', e);
+  }
+}
+ensureInitialized();
+
+const nextId = <T,>(items: T[], idOf: (item: T) => number): number =>
+  items.length ? Math.max(...items.map(idOf)) + 1 : 1;
+
+// --- Student API Functions ---------------------------------------------
 
 export const fetchStudents = async (): Promise<Student[]> => {
-  console.log("Fetching students from API...");
-  await sleep(500); // Simulate network latency
-  return Promise.resolve([...students]); // Return copy
+  await sleep(500);
+  return readCollection<Student>(KEYS.students, seedStudents);
 };
 
 export const fetchInternships = async (): Promise<Internship[]> => {
-  console.log("Fetching internships from API...");
   await sleep(500);
-  return Promise.resolve([...internships]); // Return copy
+  return readCollection<Internship>(KEYS.internships, seedInternships);
 };
 
 export const fetchInteractions = async (): Promise<Interaction[]> => {
-    console.log("Fetching interactions from API...");
-    await sleep(500);
-    return Promise.resolve([...interactions]); // Return copy
+  await sleep(500);
+  return readCollection<Interaction>(KEYS.interactions, seedInteractions);
 };
 
-// This function would send the new student data to the backend
-export const createStudent = async (userData: {name: string, email: string}): Promise<Student> => {
-    console.log("Sending new student to API...");
-    await sleep(700);
-    // In a real app, the backend would return the created student with a new ID
-    const newId = Math.floor(Math.random() * 1000) + 100;
-    const newStudent: Student = {
-        student_id: newId,
-        name: userData.name,
-        email: userData.email,
-        skills: [],
-        interests: [],
-        academic_score: null,
-        past_internship_views: [],
-        resumeText: '',
-        softSkills: [],
-        skillProficiencies: [],
-        location: null,
-        education: [],
-        achievements: [],
-        certificates: [],
-    };
-    students.push(newStudent);
-    return Promise.resolve(newStudent); 
+// Replaces the whole interactions collection. Interactions (views/applications
+// from the student side) don't have per-record endpoints in this app, so the
+// caller computes the next full array and hands it off to be persisted.
+export const saveInteractions = async (allInteractions: Interaction[]): Promise<void> => {
+  writeCollection(KEYS.interactions, allInteractions);
 };
 
+export const createStudent = async (userData: { name: string; email: string }): Promise<Student> => {
+  await sleep(700);
+  const existing = readCollection<Student>(KEYS.students, seedStudents);
+  if (existing.some(s => s.email.toLowerCase() === userData.email.toLowerCase())) {
+    throw new Error('An account with this email already exists. Please log in instead.');
+  }
+  const newStudent: Student = {
+    student_id: nextId(existing, s => s.student_id),
+    name: userData.name,
+    email: userData.email,
+    skills: [],
+    interests: [],
+    academic_score: null,
+    past_internship_views: [],
+    resumeText: '',
+    softSkills: [],
+    skillProficiencies: [],
+    location: null,
+    education: [],
+    achievements: [],
+    certificates: [],
+  };
+  writeCollection(KEYS.students, [...existing, newStudent]);
+  return newStudent;
+};
 
-// --- Recruiter API Functions ---
+// Persists an edited/AI-updated student profile (used by profile edits and
+// resume-analysis results).
+export const updateStudent = async (updatedStudent: Student): Promise<Student> => {
+  await sleep(300);
+  const existing = readCollection<Student>(KEYS.students, seedStudents);
+  const idx = existing.findIndex(s => s.student_id === updatedStudent.student_id);
+  if (idx === -1) {
+    throw new Error('Student not found');
+  }
+  const next = [...existing];
+  next[idx] = updatedStudent;
+  writeCollection(KEYS.students, next);
+  return updatedStudent;
+};
+
+// --- Recruiter API Functions ---------------------------------------------
 
 export const fetchRecruiters = async (): Promise<Recruiter[]> => {
-    console.log("Fetching recruiters from API...");
-    await sleep(500);
-    return Promise.resolve([...recruiters]); // Return copy
+  await sleep(500);
+  return readCollection<Recruiter>(KEYS.recruiters, seedRecruiters);
 };
 
 export const fetchJobs = async (): Promise<Job[]> => {
-    console.log("Fetching jobs from API...");
-    await sleep(500);
-    return Promise.resolve([...jobs]); // Return copy
+  await sleep(500);
+  return readCollection<Job>(KEYS.jobs, seedJobs);
 };
 
 export const fetchApplications = async (): Promise<Application[]> => {
-    console.log("Fetching applications from API...");
-    await sleep(500);
-    return Promise.resolve([...applications]); // Return copy
+  await sleep(500);
+  return readCollection<Application>(KEYS.applications, seedApplications);
 };
 
 export const postJob = async (jobData: Omit<Job, 'job_id' | 'postedDate' | 'isActive'>): Promise<Job> => {
-    console.log("Posting new job to API...");
-    await sleep(700);
-    const newJob: Job = {
-        ...jobData,
-        job_id: Math.floor(Math.random() * 10000) + 500, // Use larger range to avoid collision
-        postedDate: new Date().toISOString(),
-        isActive: true,
-    };
-    // Update the "Server" data
-    jobs.push(newJob);
-    // Return a COPY or the object. Since fetchJobs returns a copy, 
-    // simply returning the object here won't cause duplication in the parent state logic.
-    return Promise.resolve(newJob);
+  await sleep(700);
+  const existing = readCollection<Job>(KEYS.jobs, seedJobs);
+  const newJob: Job = {
+    ...jobData,
+    job_id: nextId(existing, j => j.job_id),
+    postedDate: new Date().toISOString(),
+    isActive: true,
+  };
+  writeCollection(KEYS.jobs, [...existing, newJob]);
+  return newJob;
 };
 
 export const createApplication = async (app: Application): Promise<Application> => {
-    console.log("Creating application record...");
-    await sleep(400);
-    applications.push(app);
-    return Promise.resolve(app);
+  await sleep(400);
+  const existing = readCollection<Application>(KEYS.applications, seedApplications);
+  writeCollection(KEYS.applications, [...existing, app]);
+  return app;
 };
 
 export const updateApplicationStatus = async (applicationId: number, status: Application['status']): Promise<Application> => {
-    console.log(`Updating application ${applicationId} to ${status}...`);
-    await sleep(400);
-    const appIndex = applications.findIndex(app => app.application_id === applicationId);
-    if (appIndex === -1) {
-        throw new Error("Application not found");
-    }
-    // Update "Server" data
-    applications[appIndex].status = status;
-    // Return a copy of the updated object
-    return Promise.resolve({ ...applications[appIndex] });
+  await sleep(400);
+  const existing = readCollection<Application>(KEYS.applications, seedApplications);
+  const appIndex = existing.findIndex(app => app.application_id === applicationId);
+  if (appIndex === -1) {
+    throw new Error('Application not found');
+  }
+  const next = [...existing];
+  next[appIndex] = { ...next[appIndex], status };
+  writeCollection(KEYS.applications, next);
+  return { ...next[appIndex] };
 };
 
-export const createRecruiter = async (userData: {name: string, email: string, company: string}): Promise<Recruiter> => {
-    console.log("Sending new recruiter to API...");
-    await sleep(700);
-    const newId = Math.floor(Math.random() * 100) + 10;
-    const newRecruiter: Recruiter = {
-        recruiter_id: newId,
-        name: userData.name,
-        email: userData.email,
-        company: userData.company,
-    };
-    recruiters.push(newRecruiter);
-    return Promise.resolve(newRecruiter);
-}
+export const createRecruiter = async (userData: { name: string; email: string; company: string }): Promise<Recruiter> => {
+  await sleep(700);
+  const existing = readCollection<Recruiter>(KEYS.recruiters, seedRecruiters);
+  if (existing.some(r => r.email.toLowerCase() === userData.email.toLowerCase())) {
+    throw new Error('An account with this email already exists. Please log in instead.');
+  }
+  const newRecruiter: Recruiter = {
+    recruiter_id: nextId(existing, r => r.recruiter_id),
+    name: userData.name,
+    email: userData.email,
+    company: userData.company,
+  };
+  writeCollection(KEYS.recruiters, [...existing, newRecruiter]);
+  return newRecruiter;
+};
+
+// --- Session persistence ---------------------------------------------------
+// Tracks who is currently logged in (student or recruiter) so a page refresh
+// or browser restart can restore the session automatically. Logging out only
+// ever clears this key -- it never touches the stored accounts/data above.
+
+export type Session = { type: 'student'; id: number } | { type: 'recruiter'; id: number };
+
+export const getSession = (): Session | null => {
+  if (!hasLocalStorage) return null;
+  try {
+    const raw = window.localStorage.getItem(KEYS.session);
+    return raw ? (JSON.parse(raw) as Session) : null;
+  } catch (e) {
+    console.error('[storage] Failed to read session.', e);
+    return null;
+  }
+};
+
+export const setSession = (session: Session): void => {
+  if (!hasLocalStorage) return;
+  try {
+    window.localStorage.setItem(KEYS.session, JSON.stringify(session));
+  } catch (e) {
+    console.error('[storage] Failed to persist session.', e);
+  }
+};
+
+export const clearSession = (): void => {
+  if (!hasLocalStorage) return;
+  try {
+    window.localStorage.removeItem(KEYS.session);
+  } catch (e) {
+    console.error('[storage] Failed to clear session.', e);
+  }
+};

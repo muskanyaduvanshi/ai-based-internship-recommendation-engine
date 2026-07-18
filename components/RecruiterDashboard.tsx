@@ -8,6 +8,8 @@ import { EnvelopeIcon } from './icons/EnvelopeIcon';
 import { PostJobForm } from './PostJobForm';
 import { ManageJobsTable } from './ManageJobsTable';
 import { ViewApplicationsTable } from './ViewApplicationsTable';
+import { AllCandidatesTable } from './AllCandidatesTable';
+import { UsersIcon } from './icons/UsersIcon';
 
 
 interface RecruiterDashboardProps {
@@ -20,7 +22,7 @@ interface RecruiterDashboardProps {
   onLogout: () => void;
 }
 
-type ActiveTab = 'post' | 'manage' | 'view';
+type ActiveTab = 'post' | 'manage' | 'view' | 'candidates';
 
 const TabButton: React.FC<{ icon: React.ReactNode; label: string; isActive: boolean; onClick: () => void; }> = ({ icon, label, isActive, onClick }) => (
     <button onClick={onClick} className={`flex-1 flex sm:flex-none sm:w-auto items-center justify-center sm:justify-start gap-3 px-4 py-3 text-sm font-bold rounded-lg transition ${isActive ? 'bg-indigo-500 text-white shadow-md' : 'text-slate-600 hover:bg-slate-200'}`}>
@@ -58,6 +60,7 @@ export const RecruiterDashboard: React.FC<RecruiterDashboardProps> = ({ recruite
           <div className="bg-white p-4 rounded-lg shadow-md mb-6">
              <div className="flex flex-col sm:flex-row items-stretch gap-2">
                 <TabButton label="View Applications" icon={<EnvelopeIcon className="h-5 w-5" />} isActive={activeTab === 'view'} onClick={() => setActiveTab('view')} />
+                <TabButton label="All Candidates" icon={<UsersIcon className="h-5 w-5" />} isActive={activeTab === 'candidates'} onClick={() => setActiveTab('candidates')} />
                 <TabButton label="Manage Jobs" icon={<ClipboardDocumentListIcon className="h-5 w-5" />} isActive={activeTab === 'manage'} onClick={() => setActiveTab('manage')} />
                 <TabButton label="Post New Job" icon={<DocumentPlusIcon className="h-5 w-5" />} isActive={activeTab === 'post'} onClick={() => setActiveTab('post')} />
              </div>
@@ -65,6 +68,7 @@ export const RecruiterDashboard: React.FC<RecruiterDashboardProps> = ({ recruite
 
           <div className="bg-white p-6 rounded-lg shadow-md">
             {activeTab === 'view' && <ViewApplicationsTable applications={applications} jobs={jobs} students={students} onUpdateApplication={onUpdateApplication} />}
+            {activeTab === 'candidates' && <AllCandidatesTable students={students} />}
             {activeTab === 'manage' && <ManageJobsTable jobs={jobs} applications={applications} />}
             {activeTab === 'post' && <PostJobForm recruiterId={recruiter.recruiter_id} onPostJob={onPostJob} onSwitchToManage={() => setActiveTab('manage')} />}
           </div>

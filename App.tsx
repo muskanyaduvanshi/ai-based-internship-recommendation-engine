@@ -8,13 +8,18 @@ import {
   fetchInternships, 
   fetchInteractions, 
   createStudent,
+  updateStudent,
   fetchRecruiters,
   fetchJobs,
   fetchApplications,
   createRecruiter,
   postJob,
   updateApplicationStatus,
-  createApplication
+  createApplication,
+  saveInteractions,
+  getSession,
+  setSession,
+  clearSession,
 } from './services/apiService';
 
 // Import components
@@ -62,10 +67,9 @@ function App() {
 
 
   // --- Data Fetching ---
-  useEffect(() => {
-    const loadData = async () => {
+  const loadData = useCallback(async (isInitialLoad: boolean) => {
       try {
-        setIsLoading(true);
+        if (isInitialLoad) setIsLoading(true);
         setError(null);
         const [
           studentsData, 
@@ -90,15 +94,54 @@ function App() {
         setJobs(jobsData);
         setApplications(applicationsData);
 
+        if (isInitialLoad) {
+          // Restore whoever was logged in before the last refresh/close, if anyone.
+          const session = getSession();
+          if (session?.type === 'student') {
+            const restoredUser = studentsData.find(s => s.student_id === session.id);
+            if (restoredUser) {
+              setCurrentUser(restoredUser);
+              setCurrentView('dashboard');
+            } else {
+              clearSession();
+            }
+          } else if (session?.type === 'recruiter') {
+            const restoredRecruiter = recruitersData.find(r => r.recruiter_id === session.id);
+            if (restoredRecruiter) {
+              setCurrentRecruiter(restoredRecruiter);
+              setCurrentView('recruiterDashboard');
+            } else {
+              clearSession();
+            }
+          }
+        }
+
       } catch (e) {
         setError("Failed to load application data. Please try refreshing the page.");
         console.error(e);
       } finally {
-        setIsLoading(false);
+        if (isInitialLoad) setIsLoading(false);
+      }
+  }, []);
+
+  useEffect(() => {
+    loadData(true);
+  }, [loadData]);
+
+  // Keep data fresh if the user has this app open in another tab/window too --
+  // e.g. a student registers or applies in one tab while a recruiter dashboard
+  // is already open in another. The native `storage` event only fires in OTHER
+  // tabs on the same origin, which is exactly the gap a one-time initial fetch
+  // can't cover on its own.
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key && e.key.startsWith('pmis_')) {
+        loadData(false);
       }
     };
-    loadData();
-  }, []);
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [loadData]);
 
   // Handle Search Trigger
   const handleSearch = useCallback(async () => {
@@ -168,6 +211,7 @@ function App() {
 
   // --- Handlers ---
   const handleLogout = () => {
+    clearSession();
     setCurrentUser(null);
     setCurrentRecruiter(null);
     setCurrentView('login');
@@ -180,6 +224,7 @@ function App() {
     setTimeout(() => {
         const user = allStudents.find(s => s.email.toLowerCase() === email.toLowerCase());
         if (user) {
+            setSession({ type: 'student', id: user.student_id });
             setCurrentUser(user);
             setCurrentView('dashboard');
         } else {
@@ -202,10 +247,11 @@ function App() {
         .join(' ');
       const newStudent = await createStudent({ name: fullName, email: userData.email });
       setAllStudents((prevStudents) => [...prevStudents, newStudent]);
+      setSession({ type: 'student', id: newStudent.student_id });
       setCurrentUser(newStudent);
       setCurrentView('dashboard');
     } catch (e) {
-      alert('Failed to register student. Please try again.');
+      alert(e instanceof Error ? e.message : 'Failed to register student. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -213,9 +259,14 @@ function App() {
 
   const handleRecruiterLogin = useCallback((email: string) => {
     setIsSubmitting(true);
-    setTimeout(() => {
+    setTimeout(async () => {
         const recruiter = allRecruiters.find(r => r.email.toLowerCase() === email.toLowerCase());
         if (recruiter) {
+            // Refresh students/jobs/applications from localStorage right before entering
+            // the dashboard, so any sign-ups or activity since this tab first loaded
+            // (including in other tabs) are guaranteed to be visible.
+            await loadData(false);
+            setSession({ type: 'recruiter', id: recruiter.recruiter_id });
             setCurrentRecruiter(recruiter);
             setCurrentView('recruiterDashboard');
         } else {
@@ -223,17 +274,18 @@ function App() {
         }
         setIsSubmitting(false);
     }, 500);
-  }, [allRecruiters]);
+  }, [allRecruiters, loadData]);
 
   const handleRecruiterRegister = useCallback(async (userData: { name: string, email: string, company: string }) => {
       setIsSubmitting(true);
       try {
           const newRecruiter = await createRecruiter(userData);
           setAllRecruiters(prev => [...prev, newRecruiter]);
+          setSession({ type: 'recruiter', id: newRecruiter.recruiter_id });
           setCurrentRecruiter(newRecruiter);
           setCurrentView('recruiterDashboard');
       } catch (e) {
-          alert('Failed to register recruiter. Please try again.');
+          alert(e instanceof Error ? e.message : 'Failed to register recruiter. Please try again.');
       } finally {
           setIsSubmitting(false);
       }
@@ -257,24 +309,22 @@ function App() {
       // 2. Sync with Student Interaction (So student sees the status update)
       const app = applications.find(a => a.application_id === applicationId);
       if (app) {
-          setInteractions(prev => {
-              const idx = prev.findIndex(i => i.student_id === app.student_id && i.internship_id === app.job_id);
-              if (idx > -1) {
-                  const updated = [...prev];
-                  updated[idx] = { 
-                      ...updated[idx], 
-                      applicationStatus: status === 'Accepted' ? 'Offer' : status === 'Rejected' ? 'Rejected' : 'Screening', // Mapping simple status to stages
-                      lastUpdated: new Date().toISOString()
-                  };
-                  return updated;
-              }
-              return prev;
-          });
+          const idx = interactions.findIndex(i => i.student_id === app.student_id && i.internship_id === app.job_id);
+          if (idx > -1) {
+              const updatedInteractions = [...interactions];
+              updatedInteractions[idx] = {
+                  ...updatedInteractions[idx],
+                  applicationStatus: status === 'Accepted' ? 'Offer' : status === 'Rejected' ? 'Rejected' : 'Screening', // Mapping simple status to stages
+                  lastUpdated: new Date().toISOString()
+              };
+              setInteractions(updatedInteractions);
+              saveInteractions(updatedInteractions).catch(e => console.error('Failed to persist interaction update', e));
+          }
       }
     } catch(e) {
       alert("Failed to update application status.");
     }
-  }, [applications]);
+  }, [applications, interactions]);
   
   const handleAnalysisComplete = useCallback((updatedStudent: Student) => {
     setAllStudents(prevStudents => 
@@ -283,12 +333,14 @@ function App() {
     if (currentUser && currentUser.student_id === updatedStudent.student_id) {
         setCurrentUser(updatedStudent);
     }
+    updateStudent(updatedStudent).catch(e => console.error('Failed to persist AI profile update', e));
   }, [currentUser]);
   
   const handleUpdateProfile = useCallback((updatedStudent: Student) => {
     setAllStudents(prev => prev.map(s => s.student_id === updatedStudent.student_id ? updatedStudent : s));
     setCurrentUser(updatedStudent);
     setIsProfileModalOpen(false);
+    updateStudent(updatedStudent).catch(e => console.error('Failed to persist profile update', e));
   }, []);
 
   const handleApplyForInternship = useCallback(async (internshipId: number) => {
@@ -296,23 +348,22 @@ function App() {
     const studentId = currentUser.student_id;
     
     // 1. Update Student Interaction
-    setInteractions(prev => {
-        const existingIdx = prev.findIndex(i => i.student_id === studentId && i.internship_id === internshipId);
-        const timestamp = new Date().toISOString();
-        const resumeSnapshot = currentUser.resumeText;
+    const existingIdx = interactions.findIndex(i => i.student_id === studentId && i.internship_id === internshipId);
+    const timestamp = new Date().toISOString();
+    const resumeSnapshot = currentUser.resumeText;
 
-        if (existingIdx > -1) {
-            const updated = [...prev];
-            updated[existingIdx] = { 
-              ...updated[existingIdx], 
-              applied: true,
-              applicationStatus: 'Applied',
-              appliedDate: timestamp,
-              submittedResume: resumeSnapshot
-            };
-            return updated;
-        }
-        return [...prev, { 
+    let updatedInteractions: Interaction[];
+    if (existingIdx > -1) {
+        updatedInteractions = [...interactions];
+        updatedInteractions[existingIdx] = { 
+          ...updatedInteractions[existingIdx], 
+          applied: true,
+          applicationStatus: 'Applied',
+          appliedDate: timestamp,
+          submittedResume: resumeSnapshot
+        };
+    } else {
+        updatedInteractions = [...interactions, { 
           student_id: studentId, 
           internship_id: internshipId, 
           view_count: 1, 
@@ -321,7 +372,9 @@ function App() {
           appliedDate: timestamp,
           submittedResume: resumeSnapshot
         }];
-    });
+    }
+    setInteractions(updatedInteractions);
+    saveInteractions(updatedInteractions).catch(e => console.error('Failed to persist interaction', e));
 
     // 2. Create Application Record (For Recruiter View)
     // Check if this internship is actually a recruiter job (has ID > 200 based on mock logic or exists in jobs array)
@@ -341,7 +394,7 @@ function App() {
         }
     }
 
-  }, [currentUser, jobs]);
+  }, [currentUser, jobs, interactions]);
   
   const navigateToLogin = () => setCurrentView('login');
   const navigateToRegister = () => setCurrentView('registration');
