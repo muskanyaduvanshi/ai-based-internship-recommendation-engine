@@ -81,7 +81,7 @@ All app data lives in the browser's `localStorage` (see `services/apiService.ts`
 To reset the app back to the original demo data, clear localStorage for the site (e.g. DevTools →
 Application → Local Storage → clear) or run `localStorage.clear()` in the browser console.
 
-## Adding a real backend later
+## Adding a real backend later 
 
 `services/apiService.ts` centralizes every read/write behind the same function signatures a real backend
 would use (`fetchStudents`, `createStudent`, `postJob`, `updateApplicationStatus`, etc.). To move to a real
